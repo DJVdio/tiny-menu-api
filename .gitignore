@@ -14,3 +14,6 @@ ENV/
 .idea/
 .vscode/
 *.log
+.claude/settings.local.json
+create_database.py
+manage_database.py
