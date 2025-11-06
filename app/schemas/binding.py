@@ -15,14 +15,15 @@ class BindingUpdate(BaseModel):
 
 class BindingResponse(BaseModel):
     """绑定关系响应"""
-    id: int
-    chef_id: int
-    customer_id: int
-    chef_username: str
-    customer_username: str
-    status: str
-    created_at: datetime
-    updated_at: Optional[datetime] = None
+    id: str  # 绑定记录ID
+    customerId: str  # 顾客ID
+    customerName: str  # 顾客姓名
+    chefId: str  # 厨师ID
+    chefName: str  # 厨师姓名
+    status: str  # 绑定状态：pending（待审批）、approved（已同意）、rejected（已拒绝）
+    createdAt: str  # 创建时间（ISO 8601格式）
+    updatedAt: Optional[str] = None  # 更新时间（ISO 8601格式）
 
     class Config:
         from_attributes = True
+        populate_by_name = True

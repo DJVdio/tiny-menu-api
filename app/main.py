@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import auth, dishes, customer_selections, chef_selections, bindings
+from .routers import auth, dishes, customer_selections, chef_selections, bindings, binding_requests
 
 app = FastAPI(
     title="Tiny Menu API",
@@ -24,6 +24,7 @@ app.include_router(dishes.router)
 app.include_router(customer_selections.router)
 app.include_router(chef_selections.router)
 app.include_router(bindings.router)
+app.include_router(binding_requests.router)
 
 
 @app.get("/")

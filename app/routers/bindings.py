@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from ..database import get_db
-from ..models.user import User, UserRole
+from ..models.user import User
 from ..models.chef_customer_binding import ChefCustomerBinding, BindingStatus
 from ..schemas.binding import BindingCreate, BindingUpdate, BindingResponse
 from ..utils.auth import get_current_user
@@ -17,24 +17,19 @@ async def request_binding(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """顾客申请绑定厨师"""
-    # 检查当前用户是否为顾客
-    if current_user.role != UserRole.CUSTOMER:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only customers can request binding"
-        )
-
-    # 查找厨师
+    """
+    申请绑定另一个用户
+    当前用户作为顾客身份，申请绑定目标用户（目标用户将作为厨师身份）
+    """
+    # 查找目标用户（将作为厨师）
     chef = db.query(User).filter(
-        User.username == binding_data.chef_username,
-        User.role == UserRole.CHEF
+        User.username == binding_data.chef_username
     ).first()
 
     if not chef:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chef not found"
+            detail="User not found"
         )
 
     # 检查是否试图绑定自己
@@ -67,15 +62,16 @@ async def request_binding(
     db.commit()
     db.refresh(new_binding)
 
+    # 构建响应
     return BindingResponse(
-        id=new_binding.id,
-        chef_id=new_binding.chef_id,
-        customer_id=new_binding.customer_id,
-        chef_username=chef.username,
-        customer_username=current_user.username,
+        id=str(new_binding.id),
+        customerId=str(new_binding.customer_id),
+        customerName=current_user.nickname,
+        chefId=str(new_binding.chef_id),
+        chefName=chef.nickname,
         status=new_binding.status.value,
-        created_at=new_binding.created_at,
-        updated_at=new_binding.updated_at
+        createdAt=new_binding.created_at.isoformat() if new_binding.created_at else None,
+        updatedAt=new_binding.updated_at.isoformat() if new_binding.updated_at else None
     )
 
 
@@ -84,15 +80,11 @@ async def get_pending_bindings(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """厨师查看待处理的绑定请求"""
-    # 检查当前用户是否为厨师
-    if current_user.role != UserRole.CHEF:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only chefs can view pending bindings"
-        )
-
-    # 查询待处理的绑定请求
+    """
+    查看待处理的绑定请求
+    作为厨师身份查看发送给自己的绑定请求
+    """
+    # 查询发送给当前用户的待处理绑定请求
     bindings = db.query(ChefCustomerBinding).filter(
         ChefCustomerBinding.chef_id == current_user.id,
         ChefCustomerBinding.status == BindingStatus.PENDING
@@ -102,14 +94,14 @@ async def get_pending_bindings(
     for binding in bindings:
         customer = db.query(User).filter(User.id == binding.customer_id).first()
         result.append(BindingResponse(
-            id=binding.id,
-            chef_id=binding.chef_id,
-            customer_id=binding.customer_id,
-            chef_username=current_user.username,
-            customer_username=customer.username,
+            id=str(binding.id),
+            customerId=str(binding.customer_id),
+            customerName=customer.nickname,
+            chefId=str(binding.chef_id),
+            chefName=current_user.nickname,
             status=binding.status.value,
-            created_at=binding.created_at,
-            updated_at=binding.updated_at
+            createdAt=binding.created_at.isoformat() if binding.created_at else None,
+            updatedAt=binding.updated_at.isoformat() if binding.updated_at else None
         ))
 
     return result
@@ -122,15 +114,11 @@ async def update_binding_status(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """厨师同意或拒绝绑定请求"""
-    # 检查当前用户是否为厨师
-    if current_user.role != UserRole.CHEF:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only chefs can update binding status"
-        )
-
-    # 查找绑定请求
+    """
+    同意或拒绝绑定请求
+    作为厨师身份处理发送给自己的绑定请求
+    """
+    # 查找发送给当前用户的绑定请求
     binding = db.query(ChefCustomerBinding).filter(
         ChefCustomerBinding.id == binding_id,
         ChefCustomerBinding.chef_id == current_user.id
@@ -164,25 +152,30 @@ async def update_binding_status(
     customer = db.query(User).filter(User.id == binding.customer_id).first()
 
     return BindingResponse(
-        id=binding.id,
-        chef_id=binding.chef_id,
-        customer_id=binding.customer_id,
-        chef_username=current_user.username,
-        customer_username=customer.username,
+        id=str(binding.id),
+        customerId=str(binding.customer_id),
+        customerName=customer.nickname,
+        chefId=str(binding.chef_id),
+        chefName=current_user.nickname,
         status=binding.status.value,
-        created_at=binding.created_at,
-        updated_at=binding.updated_at
+        createdAt=binding.created_at.isoformat() if binding.created_at else None,
+        updatedAt=binding.updated_at.isoformat() if binding.updated_at else None
     )
 
 
 @router.get("/my-bindings", response_model=List[BindingResponse])
 async def get_my_bindings(
+    as_chef: bool = False,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """获取我的绑定关系列表"""
-    if current_user.role == UserRole.CHEF:
-        # 厨师查看所有已同意的绑定顾客
+    """
+    查询我的绑定关系
+    - as_chef=true: 作为厨师身份，查看所有已同意的顾客绑定
+    - as_chef=false: 作为顾客身份，查看自己绑定的所有厨师
+    """
+    if as_chef:
+        # 作为厨师：查看所有已同意的顾客绑定
         bindings = db.query(ChefCustomerBinding).filter(
             ChefCustomerBinding.chef_id == current_user.id,
             ChefCustomerBinding.status == BindingStatus.APPROVED
@@ -192,17 +185,17 @@ async def get_my_bindings(
         for binding in bindings:
             customer = db.query(User).filter(User.id == binding.customer_id).first()
             result.append(BindingResponse(
-                id=binding.id,
-                chef_id=binding.chef_id,
-                customer_id=binding.customer_id,
-                chef_username=current_user.username,
-                customer_username=customer.username,
+                id=str(binding.id),
+                customerId=str(binding.customer_id),
+                customerName=customer.nickname,
+                chefId=str(binding.chef_id),
+                chefName=current_user.nickname,
                 status=binding.status.value,
-                created_at=binding.created_at,
-                updated_at=binding.updated_at
+                createdAt=binding.created_at.isoformat() if binding.created_at else None,
+                updatedAt=binding.updated_at.isoformat() if binding.updated_at else None
             ))
     else:
-        # 顾客查看自己的所有绑定厨师
+        # 作为顾客：查看自己绑定的所有厨师
         bindings = db.query(ChefCustomerBinding).filter(
             ChefCustomerBinding.customer_id == current_user.id
         ).all()
@@ -211,14 +204,14 @@ async def get_my_bindings(
         for binding in bindings:
             chef = db.query(User).filter(User.id == binding.chef_id).first()
             result.append(BindingResponse(
-                id=binding.id,
-                chef_id=binding.chef_id,
-                customer_id=binding.customer_id,
-                chef_username=chef.username,
-                customer_username=current_user.username,
+                id=str(binding.id),
+                customerId=str(binding.customer_id),
+                customerName=current_user.nickname,
+                chefId=str(binding.chef_id),
+                chefName=chef.nickname,
                 status=binding.status.value,
-                created_at=binding.created_at,
-                updated_at=binding.updated_at
+                createdAt=binding.created_at.isoformat() if binding.created_at else None,
+                updatedAt=binding.updated_at.isoformat() if binding.updated_at else None
             ))
 
     return result
