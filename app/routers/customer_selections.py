@@ -7,6 +7,7 @@ from ..database import get_db
 from ..models.customer_selection import CustomerSelection
 from ..models.dish import Dish
 from ..models.user import User
+from ..models.chef_customer_binding import ChefCustomerBinding, BindingStatus
 from ..schemas.selection import CustomerSelectionCreate, CustomerSelectionResponse
 from ..utils.auth import get_current_user, require_role
 
@@ -100,10 +101,21 @@ def get_all_customer_selections(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("chef"))
 ):
-    """获取所有客户的选菜（今日，仅厨师可见）"""
+    """获取已绑定顾客的选菜（今日，仅厨师可见）"""
     today = date.today()
+
+    # 获取所有已绑定的顾客ID
+    approved_bindings = db.query(ChefCustomerBinding).filter(
+        ChefCustomerBinding.chef_id == current_user.id,
+        ChefCustomerBinding.status == BindingStatus.APPROVED
+    ).all()
+
+    bound_customer_ids = [binding.customer_id for binding in approved_bindings]
+
+    # 只返回已绑定顾客的选菜
     selections = db.query(CustomerSelection).filter(
-        CustomerSelection.date == today
+        CustomerSelection.date == today,
+        CustomerSelection.user_id.in_(bound_customer_ids)
     ).all()
 
     return selections

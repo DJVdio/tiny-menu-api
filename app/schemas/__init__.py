@@ -3,6 +3,7 @@ from .dish import DishCreate, DishResponse, DishWithRecipe
 from .selection import CustomerSelectionCreate, CustomerSelectionResponse
 from .selection import ChefSelectionCreate, ChefSelectionResponse
 from .recommendation import DailyRecommendationResponse
+from .binding import BindingCreate, BindingUpdate, BindingResponse
 
 __all__ = [
     "UserCreate",
@@ -17,4 +18,7 @@ __all__ = [
     "ChefSelectionCreate",
     "ChefSelectionResponse",
     "DailyRecommendationResponse",
+    "BindingCreate",
+    "BindingUpdate",
+    "BindingResponse",
 ]
