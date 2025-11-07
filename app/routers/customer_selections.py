@@ -1,15 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from typing import List
-from datetime import date
 
 from ..database import get_db
-from ..models.customer_selection import CustomerSelection
-from ..models.dish import Dish
 from ..models.user import User
-from ..models.chef_customer_binding import ChefCustomerBinding, BindingStatus
 from ..schemas.selection import CustomerSelectionCreate, CustomerSelectionResponse
 from ..utils.auth import get_current_user, require_role
+from ..services import selection_service
 
 router = APIRouter(prefix="/api/customer-selections", tags=["客户选菜"])
 
@@ -20,41 +17,22 @@ def create_selection(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("customer"))
 ):
-    """客户选择菜品"""
-    # 验证菜品是否存在
-    dish = db.query(Dish).filter(Dish.id == selection_data.dish_id).first()
-    if not dish:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Dish not found"
-        )
+    """
+    客户选择菜品
 
-    today = date.today()
+    Args:
+        selection_data: 选择数据，包含dish_id
+        db: 数据库会话（依赖注入）
+        current_user: 当前登录用户（依赖注入，需要customer角色）
 
-    # 检查是否已经选择过该菜品
-    existing_selection = db.query(CustomerSelection).filter(
-        CustomerSelection.user_id == current_user.id,
-        CustomerSelection.dish_id == selection_data.dish_id,
-        CustomerSelection.date == today
-    ).first()
+    Returns:
+        CustomerSelectionResponse: 创建的选择记录
 
-    if existing_selection:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You have already selected this dish today"
-        )
-
-    # 创建选择记录
-    new_selection = CustomerSelection(
-        user_id=current_user.id,
-        dish_id=selection_data.dish_id,
-        date=today
-    )
-    db.add(new_selection)
-    db.commit()
-    db.refresh(new_selection)
-
-    return new_selection
+    Raises:
+        404: 菜品不存在
+        400: 今日已选择过该菜品
+    """
+    return selection_service.create_customer_selection(db, current_user, selection_data.dish_id)
 
 
 @router.get("/my-selections", response_model=List[CustomerSelectionResponse])
@@ -62,14 +40,17 @@ def get_my_selections(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("customer"))
 ):
-    """获取我的选菜记录（今日）"""
-    today = date.today()
-    selections = db.query(CustomerSelection).filter(
-        CustomerSelection.user_id == current_user.id,
-        CustomerSelection.date == today
-    ).all()
+    """
+    获取我的选菜记录（今日）
 
-    return selections
+    Args:
+        db: 数据库会话（依赖注入）
+        current_user: 当前登录用户（依赖注入，需要customer角色）
+
+    Returns:
+        List[CustomerSelectionResponse]: 今日的选菜记录列表
+    """
+    return selection_service.get_my_customer_selections(db, current_user)
 
 
 @router.delete("/{selection_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -78,21 +59,21 @@ def delete_selection(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("customer"))
 ):
-    """取消选择"""
-    selection = db.query(CustomerSelection).filter(
-        CustomerSelection.id == selection_id,
-        CustomerSelection.user_id == current_user.id
-    ).first()
+    """
+    取消选择
 
-    if not selection:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Selection not found"
-        )
+    Args:
+        selection_id: 选择记录ID
+        db: 数据库会话（依赖注入）
+        current_user: 当前登录用户（依赖注入，需要customer角色）
 
-    db.delete(selection)
-    db.commit()
+    Returns:
+        None: 204 No Content
 
+    Raises:
+        404: 选择记录不存在或不属于当前用户
+    """
+    selection_service.delete_customer_selection(db, current_user, selection_id)
     return None
 
 
@@ -101,21 +82,14 @@ def get_all_customer_selections(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("chef"))
 ):
-    """获取已绑定顾客的选菜（今日，仅厨师可见）"""
-    today = date.today()
+    """
+    获取已绑定顾客的选菜（今日，仅厨师可见）
 
-    # 获取所有已绑定的顾客ID
-    approved_bindings = db.query(ChefCustomerBinding).filter(
-        ChefCustomerBinding.chef_id == current_user.id,
-        ChefCustomerBinding.status == BindingStatus.APPROVED
-    ).all()
+    Args:
+        db: 数据库会话（依赖注入）
+        current_user: 当前登录用户（依赖注入，需要chef角色）
 
-    bound_customer_ids = [binding.customer_id for binding in approved_bindings]
-
-    # 只返回已绑定顾客的选菜
-    selections = db.query(CustomerSelection).filter(
-        CustomerSelection.date == today,
-        CustomerSelection.user_id.in_(bound_customer_ids)
-    ).all()
-
-    return selections
+    Returns:
+        List[CustomerSelectionResponse]: 已绑定顾客的今日选菜记录列表
+    """
+    return selection_service.get_all_customer_selections_for_chef(db, current_user)

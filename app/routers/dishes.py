@@ -1,16 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from typing import List
-from datetime import date, datetime, timedelta
-import random
 
 from ..database import get_db
-from ..models.dish import Dish
-from ..models.daily_recommendation import DailyRecommendation
 from ..models.user import User
 from ..schemas.dish import DishCreate, DishResponse, DishWithRecipe
 from ..schemas.recommendation import DailyRecommendationResponse
 from ..utils.auth import get_current_user, require_role
+from ..services import dish_service
 
 router = APIRouter(prefix="/api/dishes", tags=["菜品管理"])
 
@@ -21,12 +18,18 @@ def create_dish(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("chef"))
 ):
-    """创建新菜品（仅厨师）"""
-    new_dish = Dish(**dish_data.model_dump())
-    db.add(new_dish)
-    db.commit()
-    db.refresh(new_dish)
-    return new_dish
+    """
+    创建新菜品（仅厨师）
+
+    Args:
+        dish_data: 菜品数据，包含name, description, recipe, ingredients等信息
+        db: 数据库会话（依赖注入）
+        current_user: 当前登录用户（依赖注入，需要chef角色）
+
+    Returns:
+        DishResponse: 创建的菜品信息
+    """
+    return dish_service.create_dish(db, dish_data)
 
 
 @router.get("", response_model=List[DishResponse])
@@ -36,9 +39,19 @@ def get_all_dishes(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取所有菜品列表"""
-    dishes = db.query(Dish).offset(skip).limit(limit).all()
-    return dishes
+    """
+    获取所有菜品列表
+
+    Args:
+        skip: 跳过的记录数（用于分页，默认0）
+        limit: 返回的最大记录数（用于分页，默认100）
+        db: 数据库会话（依赖注入）
+        current_user: 当前登录用户（依赖注入）
+
+    Returns:
+        List[DishResponse]: 菜品列表
+    """
+    return dish_service.get_all_dishes(db, skip, limit)
 
 
 @router.get("/{dish_id}", response_model=DishWithRecipe)
@@ -47,14 +60,21 @@ def get_dish_with_recipe(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取菜品详情（包含菜谱）"""
-    dish = db.query(Dish).filter(Dish.id == dish_id).first()
-    if not dish:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Dish not found"
-        )
-    return dish
+    """
+    获取菜品详情（包含菜谱）
+
+    Args:
+        dish_id: 菜品ID
+        db: 数据库会话（依赖注入）
+        current_user: 当前登录用户（依赖注入）
+
+    Returns:
+        DishWithRecipe: 菜品详细信息，包含完整菜谱
+
+    Raises:
+        404: 菜品不存在
+    """
+    return dish_service.get_dish_by_id(db, dish_id)
 
 
 @router.get("/recommendations/today", response_model=List[DailyRecommendationResponse])
@@ -62,48 +82,17 @@ def get_today_recommendations(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取今日推荐菜品"""
-    today = date.today()
+    """
+    获取今日推荐菜品
 
-    # 查询今日推荐
-    recommendations = db.query(DailyRecommendation).filter(
-        DailyRecommendation.date == today
-    ).all()
+    Args:
+        db: 数据库会话（依赖注入）
+        current_user: 当前登录用户（依赖注入）
 
-    # 如果今天还没有推荐，则生成推荐
-    if not recommendations:
-        recommendations = generate_daily_recommendations(db, today)
-
-    return recommendations
-
-
-def generate_daily_recommendations(db: Session, target_date: date, count: int = 5):
-    """生成每日推荐（模拟AI推荐）"""
-    # 获取所有菜品
-    all_dishes = db.query(Dish).all()
-
-    if not all_dishes:
-        return []
-
-    # 随机选择菜品（这里简化处理，实际可以接入AI推荐算法）
-    selected_dishes = random.sample(all_dishes, min(count, len(all_dishes)))
-
-    recommendations = []
-    for dish in selected_dishes:
-        recommendation = DailyRecommendation(
-            date=target_date,
-            dish_id=dish.id
-        )
-        db.add(recommendation)
-        recommendations.append(recommendation)
-
-    db.commit()
-
-    # 刷新数据以获取关联的dish对象
-    for rec in recommendations:
-        db.refresh(rec)
-
-    return recommendations
+    Returns:
+        List[DailyRecommendationResponse]: 今日推荐菜品列表（如果今日没有推荐会自动生成）
+    """
+    return dish_service.get_today_recommendations(db)
 
 
 @router.post("/recommendations/generate", response_model=List[DailyRecommendationResponse])
@@ -111,16 +100,14 @@ def generate_recommendations(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("chef"))
 ):
-    """手动生成今日推荐（仅厨师）"""
-    today = date.today()
+    """
+    手动重新生成今日推荐（仅厨师）
 
-    # 删除今天已有的推荐
-    db.query(DailyRecommendation).filter(
-        DailyRecommendation.date == today
-    ).delete()
-    db.commit()
+    Args:
+        db: 数据库会话（依赖注入）
+        current_user: 当前登录用户（依赖注入，需要chef角色）
 
-    # 生成新推荐
-    recommendations = generate_daily_recommendations(db, today)
-
-    return recommendations
+    Returns:
+        List[DailyRecommendationResponse]: 新生成的今日推荐菜品列表
+    """
+    return dish_service.regenerate_today_recommendations(db)

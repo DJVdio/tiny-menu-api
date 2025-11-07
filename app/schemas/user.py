@@ -6,7 +6,6 @@ from typing import Optional
 class UserBase(BaseModel):
     """用户基础信息"""
     username: str  # 登录用户名
-    nickname: str  # 显示昵称
 
 
 class UserCreate(UserBase):
