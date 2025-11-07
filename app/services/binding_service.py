@@ -164,7 +164,7 @@ def get_my_bindings(db: Session, current_user: User, as_chef: bool = False) -> L
 
 def delete_binding(db: Session, binding_id: int, current_user: User) -> None:
     """
-    删除绑定关系（顾客或厨师都可以解除绑定）
+    解除绑定关系（顾客或厨师都可以解除绑定，软删除）
     """
     # 查找绑定关系
     binding = db.query(ChefCustomerBinding).filter(
@@ -177,14 +177,29 @@ def delete_binding(db: Session, binding_id: int, current_user: User) -> None:
             detail="Binding not found"
         )
 
-    # 检查权限：只有厨师或顾客本人可以删除
+    # 检查权限：只有厨师或顾客本人可以解绑
     if binding.chef_id != current_user.id and binding.customer_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to delete this binding"
+            detail="You don't have permission to unbind this binding"
         )
 
-    db.delete(binding)
+    # 检查是否已解绑
+    if binding.status == BindingStatus.UNBOUND:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Binding already unbound"
+        )
+
+    # 只有已同意的绑定才能解绑
+    if binding.status != BindingStatus.APPROVED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot unbind binding with status: {binding.status}"
+        )
+
+    # 软删除：修改状态为 unbound
+    binding.status = BindingStatus.UNBOUND
     db.commit()
 
 

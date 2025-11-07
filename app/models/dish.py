@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime
+from sqlalchemy import Column, Integer, String, Text, DateTime, Index
 from sqlalchemy.sql import func
 from ..database import Base
 
@@ -6,8 +6,8 @@ from ..database import Base
 class Dish(Base):
     __tablename__ = "dishes"
 
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=False, index=True)
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False)
     description = Column(Text)
     recipe = Column(Text, nullable=False)  # 菜谱详细步骤
     ingredients = Column(Text, nullable=False)  # 所需食材
@@ -17,3 +17,8 @@ class Dish(Base):
     category = Column(String(50))  # 菜系分类
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index('idx_name', 'name'),  # 按名称搜索菜品
+        Index('idx_category', 'category'),  # 按菜系分类查询
+    )

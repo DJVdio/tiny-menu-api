@@ -7,8 +7,8 @@ from fastapi import HTTPException, status
 from typing import List
 from datetime import date
 
-from ..models.customer_selection import CustomerSelection
-from ..models.chef_selection import ChefSelection
+from ..models.customer_selection import CustomerSelection, SelectionStatus
+from ..models.chef_selection import ChefSelection, ChefSelectionStatus
 from ..models.dish import Dish
 from ..models.user import User
 from ..models.chef_customer_binding import ChefCustomerBinding, BindingStatus
@@ -26,11 +26,12 @@ def create_customer_selection(db: Session, current_user: User, dish_id: int) -> 
 
     today = date.today()
 
-    # 检查是否已经选择过该菜品
+    # 检查是否已经选择过该菜品（只检查生效中的）
     existing_selection = db.query(CustomerSelection).filter(
         CustomerSelection.user_id == current_user.id,
         CustomerSelection.dish_id == dish_id,
-        CustomerSelection.date == today
+        CustomerSelection.date == today,
+        CustomerSelection.status == SelectionStatus.ACTIVE
     ).first()
 
     if existing_selection:
@@ -53,18 +54,19 @@ def create_customer_selection(db: Session, current_user: User, dish_id: int) -> 
 
 
 def get_my_customer_selections(db: Session, current_user: User) -> List[CustomerSelection]:
-    """获取我的选菜记录（今日）"""
+    """获取我的选菜记录（今日，只返回生效中的）"""
     today = date.today()
     selections = db.query(CustomerSelection).filter(
         CustomerSelection.user_id == current_user.id,
-        CustomerSelection.date == today
+        CustomerSelection.date == today,
+        CustomerSelection.status == SelectionStatus.ACTIVE
     ).all()
 
     return selections
 
 
 def delete_customer_selection(db: Session, current_user: User, selection_id: int) -> None:
-    """取消顾客选择"""
+    """取消顾客选择（软删除，修改状态为 cancelled）"""
     selection = db.query(CustomerSelection).filter(
         CustomerSelection.id == selection_id,
         CustomerSelection.user_id == current_user.id
@@ -76,12 +78,20 @@ def delete_customer_selection(db: Session, current_user: User, selection_id: int
             detail="Selection not found"
         )
 
-    db.delete(selection)
+    # 检查是否已经取消
+    if selection.status == SelectionStatus.CANCELLED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Selection already cancelled"
+        )
+
+    # 软删除：修改状态为 cancelled
+    selection.status = SelectionStatus.CANCELLED
     db.commit()
 
 
 def get_all_customer_selections_for_chef(db: Session, chef_user: User) -> List[CustomerSelection]:
-    """获取已绑定顾客的选菜（今日，仅厨师可见）"""
+    """获取已绑定顾客的选菜（今日，仅厨师可见，只返回生效中的）"""
     today = date.today()
 
     # 获取所有已绑定的顾客ID
@@ -92,10 +102,11 @@ def get_all_customer_selections_for_chef(db: Session, chef_user: User) -> List[C
 
     bound_customer_ids = [binding.customer_id for binding in approved_bindings]
 
-    # 只返回已绑定顾客的选菜
+    # 只返回已绑定顾客的选菜（只返回生效中的）
     selections = db.query(CustomerSelection).filter(
         CustomerSelection.date == today,
-        CustomerSelection.user_id.in_(bound_customer_ids)
+        CustomerSelection.user_id.in_(bound_customer_ids),
+        CustomerSelection.status == SelectionStatus.ACTIVE
     ).all()
 
     return selections
@@ -128,11 +139,12 @@ def create_chef_selection(
 
     today = date.today()
 
-    # 检查是否已经选择过
+    # 检查是否已经选择过（只检查生效中的）
     existing = db.query(ChefSelection).filter(
         ChefSelection.chef_id == current_user.id,
         ChefSelection.customer_selection_id == customer_selection_id,
-        ChefSelection.date == today
+        ChefSelection.date == today,
+        ChefSelection.status == ChefSelectionStatus.ACTIVE
     ).first()
 
     if existing:
@@ -156,18 +168,19 @@ def create_chef_selection(
 
 
 def get_my_chef_selections(db: Session, current_user: User) -> List[ChefSelection]:
-    """获取我的选菜记录（今日）"""
+    """获取我的选菜记录（今日，只返回生效中的）"""
     today = date.today()
     selections = db.query(ChefSelection).filter(
         ChefSelection.chef_id == current_user.id,
-        ChefSelection.date == today
+        ChefSelection.date == today,
+        ChefSelection.status == ChefSelectionStatus.ACTIVE
     ).all()
 
     return selections
 
 
 def delete_chef_selection(db: Session, current_user: User, selection_id: int) -> None:
-    """取消厨师选择"""
+    """取消厨师选择（软删除，修改状态为 cancelled）"""
     selection = db.query(ChefSelection).filter(
         ChefSelection.id == selection_id,
         ChefSelection.chef_id == current_user.id
@@ -179,5 +192,13 @@ def delete_chef_selection(db: Session, current_user: User, selection_id: int) ->
             detail="Selection not found"
         )
 
-    db.delete(selection)
+    # 检查是否已经取消
+    if selection.status == ChefSelectionStatus.CANCELLED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Selection already cancelled"
+        )
+
+    # 软删除：修改状态为 cancelled
+    selection.status = ChefSelectionStatus.CANCELLED
     db.commit()
