@@ -18,6 +18,31 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.get("/", tags=["Root"])
+async def root():
+    """
+    根路径端点，返回API基本信息
+    """
+    return {
+        "message": "欢迎使用 Tiny Menu API",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "redoc": "/redoc"
+    }
+
+
+@app.get("/health", tags=["Health"])
+async def health_check():
+    """
+    健康检查端点，用于监控服务状态
+    """
+    return {
+        "status": "healthy",
+        "service": "Tiny Menu API"
+    }
+
+
 # 注册路由
 app.include_router(auth.router)
 app.include_router(dishes.router)
