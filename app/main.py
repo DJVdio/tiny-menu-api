@@ -26,7 +26,6 @@ app.include_router(chef_selections.router)
 app.include_router(bindings.router)
 app.include_router(binding_requests.router)
 
-
 @app.get("/")
 def root():
     """健康检查"""
@@ -36,8 +35,19 @@ def root():
         "redoc": "/redoc"
     }
 
-
 @app.get("/health")
 def health_check():
     """健康检查端点"""
     return {"status": "healthy"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    from .config import settings
+
+    uvicorn.run(
+        "app.main:app",
+        host=settings.HOST,
+        port=settings.PORT,
+        reload=True
+    )
